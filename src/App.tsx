@@ -48,6 +48,7 @@ export default function App() {
   const [sessionHistory, setSessionHistory] = useState<number[]>([]);
   const [trendView, setTrendView] = useState<'live' | 'session'>('live');
   const [showLogs, setShowLogs] = useState(false);
+  const [speechFocus, setSpeechFocus] = useState(false);
 
   const audioContext = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
@@ -64,7 +65,7 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem(DB_METER_KEY);
     if (saved) {
-      const { threshold, deviceId, durationThreshold } = JSON.parse(saved);
+      const { threshold, deviceId, durationThreshold, speechFocus } = JSON.parse(saved);
       if (threshold) {
         setThreshold(threshold);
         thresholdRef.current = threshold;
@@ -73,6 +74,7 @@ export default function App() {
         setDurationThreshold(durationThreshold);
         durationRef.current = durationThreshold;
       }
+      if (speechFocus !== undefined) setSpeechFocus(speechFocus);
       if (deviceId) setSelectedDevice(deviceId);
     }
 
@@ -89,11 +91,12 @@ export default function App() {
     localStorage.setItem(DB_METER_KEY, JSON.stringify({
       threshold,
       deviceId: selectedDevice,
-      durationThreshold
+      durationThreshold,
+      speechFocus
     }));
     thresholdRef.current = threshold;
     durationRef.current = durationThreshold;
-  }, [threshold, selectedDevice, durationThreshold]);
+  }, [threshold, selectedDevice, durationThreshold, speechFocus]);
 
   useEffect(() => {
     if (!selectedDevice) return;
@@ -103,7 +106,7 @@ export default function App() {
       setPeak(0);
       setHistory(new Array(100).fill(0));
     };
-  }, [selectedDevice]);
+  }, [selectedDevice, speechFocus]);
 
   useEffect(() => {
     // Session aggregator: Every 30 seconds, push the max peak of that period
@@ -124,15 +127,49 @@ export default function App() {
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { deviceId: { exact: deviceId } }
+        audio: {
+          deviceId: { exact: deviceId },
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: false // Keep it consistent for measurement
+        }
       });
       streamRef.current = stream;
 
       audioContext.current = new AudioContext();
       const source = audioContext.current.createMediaStreamSource(stream);
+
+      let lastNode: AudioNode = source;
+
+      if (speechFocus) {
+        // Multi-stage filtering for steep roll-offs (4th order)
+
+        // High-pass: Remove laptop vibrations and keyboard thuds (< 400Hz)
+        const hp1 = audioContext.current.createBiquadFilter();
+        hp1.type = 'highpass';
+        hp1.frequency.value = 400;
+        const hp2 = audioContext.current.createBiquadFilter();
+        hp2.type = 'highpass';
+        hp2.frequency.value = 400;
+
+        // Low-pass: Remove sharp mechanical clicks and high background noise (> 3000Hz)
+        const lp1 = audioContext.current.createBiquadFilter();
+        lp1.type = 'lowpass';
+        lp1.frequency.value = 3000;
+        const lp2 = audioContext.current.createBiquadFilter();
+        lp2.type = 'lowpass';
+        lp2.frequency.value = 3000;
+
+        lastNode.connect(hp1);
+        hp1.connect(hp2);
+        hp2.connect(lp1);
+        lp1.connect(lp2);
+        lastNode = lp2;
+      }
+
       analyser.current = audioContext.current.createAnalyser();
       analyser.current.fftSize = 256;
-      source.connect(analyser.current);
+      lastNode.connect(analyser.current);
 
       const bufferLength = analyser.current.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
@@ -463,6 +500,40 @@ export default function App() {
           />
         </div>
 
+        <div className="control-item glass">
+          <div className="label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>
+              <Mic size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+              Speech Focus Mode
+            </span>
+            <div
+              onClick={() => setSpeechFocus(!speechFocus)}
+              style={{
+                width: 40,
+                height: 20,
+                background: speechFocus ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
+                borderRadius: 20,
+                position: 'relative',
+                cursor: 'pointer',
+                transition: 'all 0.3s'
+              }}
+            >
+              <div style={{
+                width: 16,
+                height: 16,
+                background: '#fff',
+                borderRadius: '50%',
+                position: 'absolute',
+                top: 2,
+                left: speechFocus ? 22 : 2,
+                transition: 'all 0.3s'
+              }} />
+            </div>
+          </div>
+          <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
+            Filters out keyboard typing and background hum.
+          </div>
+        </div>
       </div>
     </div>
   );
