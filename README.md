@@ -52,3 +52,6 @@ The output will be found in the `release/win-unpacked` folder.
 
 ---
 *Created with ❤️ by AB for professional noise monitoring.*
+
+If you find this tool useful, consider supporting me with a coffee:
+[Buy me a coffee](https://buymeacoffee.com/albertboursin)
