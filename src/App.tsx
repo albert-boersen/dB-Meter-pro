@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Mic, Bell, Activity } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Mic, Bell, Activity, Settings, X } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 declare global {
   interface Window {
@@ -30,8 +30,61 @@ const getDbLabel = (db: number) => {
   if (db < 80) return 'Loud Café';
   if (db < 90) return 'Vacuum / Traffic';
   if (db < 100) return 'Sound System';
-  return 'Potential Hearing Damage!';
+  return 'Potential Damage!';
 };
+
+function CircularMeter({ value, threshold, isAlerting }: { value: number; threshold: number; isAlerting: boolean }) {
+  const size = 320;
+  const stroke = 12;
+  const radius = (size / 2) - (stroke * 2);
+  const circumference = radius * 2 * Math.PI;
+  // Map 0-120dB to 0-100% of circle
+  const percentage = Math.min(100, Math.max(0, (value / 120) * 100));
+  const offset = circumference - (percentage / 100) * circumference;
+  const thresholdPercentage = (threshold / 120) * 100;
+
+  return (
+    <div className="meter-container">
+      {/* Glow Layer */}
+      <div style={{
+        position: 'absolute', inset: 0, borderRadius: '50%',
+        background: isAlerting ? 'radial-gradient(circle, rgba(244,63,94,0.15) 0%, transparent 70%)' : 'radial-gradient(circle, rgba(56,189,248,0.1) 0%, transparent 70%)',
+        zIndex: 0
+      }} />
+
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ transform: 'rotate(-90deg)', zIndex: 1 }}>
+        {/* Background Track */}
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth={stroke}
+        />
+        {/* Threshold Marker */}
+        <circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke="var(--danger)" strokeWidth={stroke + 2}
+          strokeDasharray={`${2} ${circumference / 100 * 1 - 2}`}
+          strokeDashoffset={-(circumference * (thresholdPercentage / 100))}
+          style={{ opacity: 0.5 }}
+        />
+        {/* Progress Bar */}
+        <motion.circle
+          cx={size / 2} cy={size / 2} r={radius}
+          fill="none" stroke={isAlerting ? 'var(--danger)' : 'url(#meterGradient)'} strokeWidth={stroke}
+          strokeDasharray={circumference}
+          animate={{ strokeDashoffset: offset }}
+          transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+          strokeLinecap="round"
+        />
+        <defs>
+          <linearGradient id="meterGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="var(--accent)" />
+            <stop offset="100%" stopColor="var(--accent-purple)" />
+          </linearGradient>
+        </defs>
+      </svg>
+    </div>
+  );
+}
 
 export default function App() {
   const [displayDb, setDisplayDb] = useState(0);
@@ -46,9 +99,9 @@ export default function App() {
   const [events, setEvents] = useState<SoundEvent[]>([]);
   const [sessionHistory, setSessionHistory] = useState<number[]>([]);
   const [trendView, setTrendView] = useState<'live' | 'session'>('live');
-  const [showLogs, setShowLogs] = useState(false);
   const [calibrationOffset, setCalibrationOffset] = useState(0);
   const [smoothingSpeed, setSmoothingSpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   const audioContext = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
@@ -281,271 +334,160 @@ export default function App() {
   };
 
   return (
-    <div className="app-container">
-      <div className="title-bar">
-        <Activity size={16} className="mr-2" style={{ marginRight: 8 }} />
-        dB Meter Pro
+    <div className="app-root">
+      <div className="bg-mesh" />
+      <div className="bg-overlay" />
+
+      <div className="title-bar" style={{ justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <Activity size={12} style={{ marginRight: 8, color: 'var(--accent)' }} />
+          dB Meter Pro
+        </div>
+
+        {/* Mobile Menu Toggle */}
+        <button
+          className="btn-premium"
+          style={{ padding: '4px 8px', height: 26, fontSize: 10, border: 'none', background: isMobileMenuOpen ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: isMobileMenuOpen ? '#000' : '#fff' }}
+          onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        >
+          {isMobileMenuOpen ? <X size={14} /> : <Settings size={14} />}
+          <span style={{ marginLeft: 6 }}>{isMobileMenuOpen ? 'CLOSE' : 'SETTINGS'}</span>
+        </button>
       </div>
 
-      <motion.div
-        className="main-card glass"
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-      >
-        <div style={{ position: 'absolute', top: 20, right: 20, display: 'flex', alignItems: 'center' }}>
-          <div className={`alert-dot ${isAlerting ? 'active' : ''}`} />
-          <span className="label" style={{ color: isAlerting ? 'var(--danger)' : 'var(--text-secondary)' }}>
-            {isAlerting ? 'THRESHOLD EXCEEDED' : 'LIVE MONITORING'}
-          </span>
-        </div>
-
-        <motion.span
-          className="db-value"
-          animate={{ scale: isAlerting ? [1, 1.02, 1] : 1 }}
-          transition={{ duration: 0.1 }}
-        >
-          {displayDb.toFixed(1)}
-        </motion.span>
-        <span className="db-unit">DECIBELS</span>
-
-        <motion.div
-          key={getDbLabel(Math.round(displayDb))}
-          initial={{ opacity: 0, y: 5 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{ marginTop: 8, color: isAlerting ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, fontSize: 13 }}
-        >
-          {getDbLabel(Math.round(displayDb))}
-        </motion.div>
-
-        <div style={{ marginTop: 24, display: 'flex', gap: 16 }}>
-          <div className="glass" style={{ padding: '8px 16px', textAlign: 'center', minWidth: 140 }}>
-            <div className="label" style={{ fontSize: 10 }}>Peak Level</div>
-            <div style={{ fontSize: 24, fontWeight: '800', color: 'var(--accent)' }}>{peak}</div>
-            <div style={{ fontSize: 9, opacity: 0.6, marginTop: 2, textTransform: 'uppercase' }}>{getDbLabel(peak)}</div>
+      <main className="app-layout">
+        {/* LEFT SIDE: Controls */}
+        <aside className={`area-side-left ${!isMobileMenuOpen ? 'mobile-hidden' : ''}`}>
+          <div className="glass control-item">
+            <div className="label"><Mic size={14} /> Device Selection</div>
+            <select value={selectedDevice} onChange={(e) => setSelectedDevice(e.target.value)}>
+              {devices.map(d => (
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Mic ${d.deviceId.slice(0, 5)}`}</option>
+              ))}
+            </select>
           </div>
-          <button
-            className="glass"
-            style={{ padding: '8px 16px', color: 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: '600', transition: 'all 0.2s', border: '1px solid rgba(255,255,255,0.1)' }}
-            onClick={() => setPeak(0)}
-          >
-            Reset Peak
-          </button>
-          <button
-            className="glass"
-            style={{ padding: '8px 16px', color: showLogs ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontSize: 12, fontWeight: '600', transition: 'all 0.2s', border: '1px solid rgba(255,255,255,0.1)' }}
-            onClick={() => setShowLogs(!showLogs)}
-          >
-            {showLogs ? 'Hide Logs' : 'View Logs'} ({events.length})
-          </button>
-        </div>
 
-        <div style={{ marginTop: 40, width: '100%', minHeight: 120 }}>
-          <div className="label" style={{ marginBottom: 12, opacity: 0.6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>{trendView === 'live' ? 'Live Activity (5s)' : 'Session Trend (4h max)'}</span>
-            <div className="glass" style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', padding: 2 }}>
-              <button
-                onClick={() => setTrendView('live')}
-                style={{ background: trendView === 'live' ? 'rgba(56, 189, 248, 0.2)' : 'transparent', border: 'none', color: trendView === 'live' ? 'var(--accent)' : 'var(--text-secondary)', padding: '2px 8px', fontSize: 10, cursor: 'pointer', transition: 'all 0.2s', borderRadius: 6 }}
-              >
-                LIVE
-              </button>
-              <button
-                onClick={() => setTrendView('session')}
-                style={{ background: trendView === 'session' ? 'rgba(56, 189, 248, 0.2)' : 'transparent', border: 'none', color: trendView === 'session' ? 'var(--accent)' : 'var(--text-secondary)', padding: '2px 8px', fontSize: 10, cursor: 'pointer', transition: 'all 0.2s', borderRadius: 6 }}
-              >
-                SESSION
-              </button>
+          <div className="glass" style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <div style={{ flex: 1 }}>
+              <div className="label" style={{ marginBottom: 4 }}>Current Peak</div>
+              <div style={{ fontSize: 24, fontWeight: '900', color: 'var(--accent)', letterSpacing: -1 }}>{peak} <span style={{ fontSize: 10, opacity: 0.5 }}>dB</span></div>
             </div>
+            <button className="btn-premium" style={{ height: 40 }} onClick={() => setPeak(0)}>RESET</button>
           </div>
-          <div className="glass" style={{ width: '100%', height: 70, display: 'flex', alignItems: 'flex-end', gap: 1, padding: '4px' }}>
-            {trendView === 'live' ? (
-              history.map((h, i) => (
-                <div
-                  key={i}
+
+          <div className="glass control-item">
+            <div className="label"><Bell size={14} /> Notification Threshold ({threshold} dB)</div>
+            <input type="range" min="30" max="110" value={threshold} onChange={(e) => setThreshold(parseInt(e.target.value))} />
+            <div style={{ fontSize: 9, opacity: 0.6, textAlign: 'center', letterSpacing: 1 }}>{getDbLabel(threshold).toUpperCase()}</div>
+          </div>
+
+          <div className="glass control-item">
+            <div className="label"><Activity size={14} /> Smoothing Speed</div>
+            <div style={{ display: 'flex', gap: 4, background: 'rgba(0,0,0,0.3)', padding: 4, borderRadius: 12 }}>
+              {(['slow', 'medium', 'fast'] as const).map(speed => (
+                <button
+                  key={speed}
+                  onClick={() => setSmoothingSpeed(speed)}
+                  className="btn-premium"
                   style={{
                     flex: 1,
-                    height: `${Math.max(4, (h / 120) * 100)}%`,
-                    background: h > threshold ? 'var(--danger)' : 'var(--accent)',
-                    opacity: 0.3 + (h / 120) * 0.7,
-                    borderRadius: 1,
-                    transition: 'height 0.1s ease'
+                    border: 'none',
+                    background: smoothingSpeed === speed ? 'var(--accent)' : 'transparent',
+                    color: smoothingSpeed === speed ? '#000' : 'inherit',
+                    padding: '6px 0',
+                    fontSize: 9
                   }}
-                />
-              ))
-            ) : (
-              sessionHistory.length === 0 ? (
-                <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, opacity: 0.4 }}>
-                  Collecting session data... (updates every 30s)
-                </div>
-              ) : (
-                sessionHistory.map((h, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      flex: 1,
-                      height: `${Math.max(4, (h / 120) * 100)}%`,
-                      background: h > threshold ? 'var(--danger)' : 'var(--accent)',
-                      opacity: 0.3 + (h / 120) * 0.7,
-                      borderRadius: 1,
-                    }}
-                  />
-                ))
-              )
-            )}
+                >
+                  {speed.toUpperCase()}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
 
-        {showLogs && (
-          <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            style={{ marginTop: 40, width: '100%' }}
-          >
-            <div className="label" style={{ marginBottom: 12, opacity: 0.6, display: 'flex', justifyContent: 'space-between' }}>
-              <span>Recent Noise Events</span>
-              <div style={{ display: 'flex', gap: 12 }}>
-                {events.length > 0 && <span style={{ cursor: 'pointer', color: 'var(--accent)' }} onClick={() => window.electron.exportLogs(events)}>Export CSV</span>}
-                {events.length > 0 && <span style={{ cursor: 'pointer', color: 'var(--accent)' }} onClick={() => setEvents([])}>Clear History</span>}
+          <div className="glass control-item">
+            <div className="label"><Activity size={14} /> Manual Calibration ({calibrationOffset > 0 ? '+' : ''}{calibrationOffset} dB)</div>
+            <input type="range" min="-30" max="30" value={calibrationOffset} onChange={(e) => setCalibrationOffset(parseInt(e.target.value))} />
+          </div>
+        </aside>
+
+        {/* CENTER: Main Meter */}
+        <section className="area-center">
+          <div className="meter-container">
+            <CircularMeter value={displayDb} threshold={threshold} isAlerting={isAlerting} />
+            <div style={{ position: 'absolute', pointerEvents: 'none' }}>
+              <motion.div className="db-display">
+                <div className="db-value">{displayDb.toFixed(1)}</div>
+                <div className="db-unit">Decibels</div>
+              </motion.div>
+            </div>
+          </div>
+
+          <div style={{ marginTop: -10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={getDbLabel(Math.round(displayDb))}
+                initial={{ opacity: 0, y: 10, filter: 'blur(10px)' }}
+                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, y: -10, filter: 'blur(10px)' }}
+                style={{ fontSize: 13, fontWeight: '900', letterSpacing: 3, textTransform: 'uppercase', color: isAlerting ? 'var(--danger)' : 'var(--accent)' }}
+              >
+                {getDbLabel(Math.round(displayDb))}
+              </motion.div>
+            </AnimatePresence>
+
+            <div className="alert-indicator">
+              <div className={`status-dot ${isAlerting ? 'active' : ''}`} />
+              {isAlerting ? 'THRESHOLD EXCEEDED' : 'SIGNAL STABLE'}
+            </div>
+          </div>
+
+          <div className="visualizer-mini" style={{ width: '100%', maxWidth: 280, marginTop: 30 }}>
+            {frequencies.map((v, i) => (
+              <div key={i} className="v-bar" style={{ height: `${Math.max(10, v * 100)}%`, opacity: 0.15 + (v * 0.85), background: isAlerting ? 'var(--danger)' : 'var(--accent)' }} />
+            ))}
+          </div>
+        </section>
+
+        {/* RIGHT SIDE: History */}
+        <aside className={`area-side-right ${!isMobileMenuOpen ? 'mobile-hidden' : ''}`}>
+          <div className="glass" style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: 22 }}>
+            <div className="label" style={{ marginBottom: 14, justifyContent: 'space-between' }}>
+              <span>Trend History</span>
+              <div style={{ display: 'flex', gap: 4, background: 'rgba(0,0,0,0.2)', padding: 2, borderRadius: 8 }}>
+                <button onClick={() => setTrendView('live')} style={{ fontSize: 8, padding: '2px 6px', borderRadius: 6, cursor: 'pointer', border: 'none', background: trendView === 'live' ? 'var(--accent)' : 'transparent', color: trendView === 'live' ? '#000' : '#fff' }}>LIVE</button>
+                <button onClick={() => setTrendView('session')} style={{ fontSize: 8, padding: '2px 6px', borderRadius: 6, cursor: 'pointer', border: 'none', background: trendView === 'session' ? 'var(--accent)' : 'transparent', color: trendView === 'session' ? '#000' : '#fff' }}>SESSION</button>
               </div>
             </div>
-            <div className="custom-scrollbar" style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 300, overflowY: 'auto', paddingRight: 4 }}>
+
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 1, background: 'rgba(0,0,0,0.3)', borderRadius: 16, padding: 10, minHeight: 140 }}>
+              {(trendView === 'live' ? history : sessionHistory).map((h, i) => (
+                <div key={i} style={{ flex: 1, height: `${(h / 120) * 100}%`, background: h > threshold ? 'var(--danger)' : 'var(--accent)', opacity: 0.2 + (h / 120) * 0.8, borderRadius: 2 }} />
+              ))}
+            </div>
+
+            <div className="label" style={{ marginTop: 24, marginBottom: 14, justifyContent: 'space-between' }}>
+              <span>Recent Activity</span>
+              {events.length > 0 && <span style={{ cursor: 'pointer', color: 'var(--accent)', fontSize: 9 }} onClick={() => window.electron.exportLogs(events)}>EXPORT</span>}
+            </div>
+
+            <div className="custom-scrollbar" style={{ flex: 2, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
               {events.length === 0 ? (
-                <div className="glass" style={{ padding: '20px', textAlign: 'center', opacity: 0.4, fontSize: 13 }}>
-                  No significant noise events recorded yet.
-                </div>
+                <div style={{ padding: 30, textAlign: 'center', opacity: 0.2, fontSize: 11, fontStyle: 'italic' }}>No alerts recorded</div>
               ) : (
-                events.map((event) => (
-                  <motion.div
-                    key={event.id}
-                    initial={{ opacity: 0, x: -10 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    className="glass"
-                    style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderLeft: '3px solid var(--danger)' }}
-                  >
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{ fontSize: 10, opacity: 0.5, marginBottom: 2 }}>{event.timestamp}</span>
-                      <span style={{ fontWeight: '600', fontSize: 14 }}>{event.label}</span>
+                events.map(e => (
+                  <div key={e.id} className="glass" style={{ padding: '12px 14px', borderLeft: '4px solid var(--danger)', borderRadius: 14, background: 'rgba(244,63,94,0.03)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <span style={{ fontSize: 9, opacity: 0.5, letterSpacing: 1 }}>{e.timestamp}</span>
+                      <span style={{ fontSize: 12, fontWeight: '900', color: 'var(--danger)' }}>{e.db} dB</span>
                     </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <span style={{ fontSize: 18, fontWeight: '800', color: 'var(--danger)' }}>{event.db}</span>
-                      <span style={{ fontSize: 10, opacity: 0.5, marginLeft: 4 }}>dB</span>
-                    </div>
-                  </motion.div>
+                    <div style={{ fontSize: 11, fontWeight: '800', color: 'var(--text-primary)' }}>{e.label.toUpperCase()}</div>
+                  </div>
                 ))
               )}
             </div>
-          </motion.div>
-        )}
-
-        <div className="visualizer-container" style={{ gap: 4 }}>
-          {frequencies.map((v, i) => (
-            <div
-              key={i}
-              className="bar"
-              style={{
-                height: `${Math.max(4, v * 100)}%`,
-                background: isAlerting ? 'var(--danger)' : 'var(--accent)',
-                opacity: 0.2 + (v * 0.8),
-                borderRadius: '4px'
-              }}
-            />
-          ))}
-        </div>
-      </motion.div>
-
-      <div className="controls">
-        <div className="control-item glass">
-          <div className="label">
-            <Mic size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Microphone Selection
           </div>
-          <select
-            value={selectedDevice}
-            onChange={(e) => setSelectedDevice(e.target.value)}
-          >
-            {devices.map(d => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || `Microphone ${d.deviceId.slice(0, 5)}`}</option>
-            ))}
-          </select>
-        </div>
-
-        <div className="control-item glass">
-          <div className="label">
-            <Bell size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Notification Threshold ({threshold} dB - {getDbLabel(threshold)})
-          </div>
-          <input
-            type="range"
-            min="30"
-            max="120"
-            value={threshold}
-            onChange={(e) => setThreshold(parseInt(e.target.value))}
-          />
-        </div>
-
-        <div className="control-item glass">
-          <div className="label">
-            <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Duration Filter ({durationThreshold.toFixed(1)}s)
-          </div>
-          <input
-            type="range"
-            min="0.1"
-            max="10"
-            step="0.1"
-            value={durationThreshold}
-            onChange={(e) => setDurationThreshold(parseFloat(e.target.value))}
-          />
-        </div>
-
-        <div className="control-item glass">
-          <div className="label">
-            <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Smoothing Speed
-          </div>
-          <div className="glass" style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', padding: 2, marginTop: 8 }}>
-            {(['slow', 'medium', 'fast'] as const).map(speed => (
-              <button
-                key={speed}
-                onClick={() => setSmoothingSpeed(speed)}
-                style={{
-                  flex: 1,
-                  background: smoothingSpeed === speed ? 'var(--accent)' : 'transparent',
-                  border: 'none',
-                  color: smoothingSpeed === speed ? '#fff' : 'var(--text-secondary)',
-                  padding: '6px 4px',
-                  fontSize: 10,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                  borderRadius: 6,
-                  fontWeight: '600',
-                  textTransform: 'uppercase'
-                }}
-              >
-                {speed}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="control-item glass">
-          <div className="label">
-            <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Manual Calibration ({calibrationOffset > 0 ? '+' : ''}{calibrationOffset} dB)
-          </div>
-          <input
-            type="range"
-            min="-30"
-            max="30"
-            step="1"
-            value={calibrationOffset}
-            onChange={(e) => setCalibrationOffset(parseInt(e.target.value))}
-          />
-          <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
-            Compare with a phone app and use this slider to align the readings.
-          </div>
-        </div>
-      </div>
+        </aside>
+      </main>
     </div>
   );
 }
