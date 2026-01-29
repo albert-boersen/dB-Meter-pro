@@ -1,7 +1,7 @@
 {
   "name": "db-meter-win",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Premium Windows Decibel Meter with notifications and history trend.",
   "author": "Antigravity AI",
   "main": "main.js",
