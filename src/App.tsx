@@ -34,7 +34,6 @@ const getDbLabel = (db: number) => {
 };
 
 export default function App() {
-  const [db, setDb] = useState(0);
   const [displayDb, setDisplayDb] = useState(0);
   const [peak, setPeak] = useState(0);
   const [history, setHistory] = useState<number[]>(new Array(100).fill(0));
@@ -61,6 +60,8 @@ export default function App() {
   const loudStartTimeRef = useRef<number | null>(null);
   const calibrationRef = useRef(0);
   const smoothingAlphaRef = useRef(0.25);
+  const displayIntervalRef = useRef(700);
+  const lastDisplayUpdateRef = useRef(0);
   const sessionPeakRef = useRef(0);
   const eventPeakRef = useRef(0);
   const isEventOccurring = useRef(false);
@@ -84,7 +85,9 @@ export default function App() {
       if (smoothingSpeed) {
         setSmoothingSpeed(smoothingSpeed);
         const alphas = { slow: 0.1, medium: 0.25, fast: 0.6 };
+        const intervals = { slow: 1000, medium: 700, fast: 400 };
         smoothingAlphaRef.current = alphas[smoothingSpeed as 'slow' | 'medium' | 'fast'] || 0.25;
+        displayIntervalRef.current = intervals[smoothingSpeed as 'slow' | 'medium' | 'fast'] || 700;
       }
       if (deviceId) setSelectedDevice(deviceId);
     }
@@ -111,7 +114,9 @@ export default function App() {
     calibrationRef.current = calibrationOffset;
 
     const alphas = { slow: 0.1, medium: 0.25, fast: 0.6 };
+    const intervals = { slow: 1000, medium: 700, fast: 400 };
     smoothingAlphaRef.current = alphas[smoothingSpeed] || 0.25;
+    displayIntervalRef.current = intervals[smoothingSpeed] || 700;
   }, [threshold, selectedDevice, durationThreshold, calibrationOffset, smoothingSpeed]);
 
   useEffect(() => {
@@ -165,6 +170,7 @@ export default function App() {
 
       const update = () => {
         if (!analyser.current) return;
+        const now = Date.now();
         analyser.current.getFloatTimeDomainData(dataArray);
         analyser.current.getByteFrequencyData(freqArray);
 
@@ -179,13 +185,16 @@ export default function App() {
         // This is the "sweet spot" identified after testing with -15dB offset.
         const baseDb = rms > 0.000001 ? 20 * Math.log10(rms) + 80 : 0;
         const currentDb = Math.round(Math.max(0, baseDb + calibrationRef.current));
-        setDb(currentDb);
 
-        // Exponential Moving Average for display smoothing
-        // Uses dynamic alpha constant based on user preference
+        // Exponential Moving Average for background smoothing (high frequency)
         const alpha = smoothingAlphaRef.current;
         smoothedDbRef.current = (alpha * currentDb) + (1 - alpha) * smoothedDbRef.current;
-        setDisplayDb(Math.round(smoothedDbRef.current));
+
+        // Throttled UI Display Update
+        if (now - lastDisplayUpdateRef.current > displayIntervalRef.current) {
+          setDisplayDb(smoothedDbRef.current);
+          lastDisplayUpdateRef.current = now;
+        }
 
         // Visualizer data (using freqArray for visual dance)
         const visualData = Array.from(freqArray.slice(0, 40)).map(v => v / 255);
@@ -196,7 +205,6 @@ export default function App() {
         sessionPeakRef.current = Math.max(sessionPeakRef.current, currentDb);
 
         // Update History (throttle updates to state)
-        const now = Date.now();
         if (now % 3 === 0) { // Update history roughly every 50ms
           setHistory(prev => [...prev.slice(1), currentDb]);
         }
@@ -217,7 +225,6 @@ export default function App() {
           // Track peak for the current loud event
           eventPeakRef.current = Math.max(eventPeakRef.current, currentDb);
 
-          const now = Date.now();
           // Only start event if sustained long enough
           if (!isEventOccurring.current && sustainedDuration >= currentDurationLimit && (now - lastNotifyTime.current > 7000)) {
             isEventOccurring.current = true;
@@ -297,17 +304,17 @@ export default function App() {
           animate={{ scale: isAlerting ? [1, 1.02, 1] : 1 }}
           transition={{ duration: 0.1 }}
         >
-          {displayDb}
+          {displayDb.toFixed(1)}
         </motion.span>
         <span className="db-unit">DECIBELS</span>
 
         <motion.div
-          key={getDbLabel(db)}
+          key={getDbLabel(Math.round(displayDb))}
           initial={{ opacity: 0, y: 5 }}
           animate={{ opacity: 1, y: 0 }}
           style={{ marginTop: 8, color: isAlerting ? 'var(--danger)' : 'var(--text-secondary)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1, fontSize: 13 }}
         >
-          {getDbLabel(db)}
+          {getDbLabel(Math.round(displayDb))}
         </motion.div>
 
         <div style={{ marginTop: 24, display: 'flex', gap: 16 }}>
@@ -465,7 +472,7 @@ export default function App() {
         <div className="control-item glass">
           <div className="label">
             <Bell size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-            Notification Threshold ({threshold} dB)
+            Notification Threshold ({threshold} dB - {getDbLabel(threshold)})
           </div>
           <input
             type="range"
