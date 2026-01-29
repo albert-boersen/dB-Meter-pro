@@ -48,7 +48,8 @@ export default function App() {
   const [sessionHistory, setSessionHistory] = useState<number[]>([]);
   const [trendView, setTrendView] = useState<'live' | 'session'>('live');
   const [showLogs, setShowLogs] = useState(false);
-  const [speechFocus, setSpeechFocus] = useState(false);
+  const [calibrationOffset, setCalibrationOffset] = useState(0);
+  const [smoothingSpeed, setSmoothingSpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
 
   const audioContext = useRef<AudioContext | null>(null);
   const analyser = useRef<AnalyserNode | null>(null);
@@ -58,6 +59,8 @@ export default function App() {
   const smoothedDbRef = useRef(0);
   const durationRef = useRef(2);
   const loudStartTimeRef = useRef<number | null>(null);
+  const calibrationRef = useRef(0);
+  const smoothingAlphaRef = useRef(0.25);
   const sessionPeakRef = useRef(0);
   const eventPeakRef = useRef(0);
   const isEventOccurring = useRef(false);
@@ -65,7 +68,7 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem(DB_METER_KEY);
     if (saved) {
-      const { threshold, deviceId, durationThreshold, speechFocus } = JSON.parse(saved);
+      const { threshold, deviceId, durationThreshold, calibrationOffset, smoothingSpeed } = JSON.parse(saved);
       if (threshold) {
         setThreshold(threshold);
         thresholdRef.current = threshold;
@@ -74,7 +77,15 @@ export default function App() {
         setDurationThreshold(durationThreshold);
         durationRef.current = durationThreshold;
       }
-      if (speechFocus !== undefined) setSpeechFocus(speechFocus);
+      if (calibrationOffset !== undefined) {
+        setCalibrationOffset(calibrationOffset);
+        calibrationRef.current = calibrationOffset;
+      }
+      if (smoothingSpeed) {
+        setSmoothingSpeed(smoothingSpeed);
+        const alphas = { slow: 0.1, medium: 0.25, fast: 0.6 };
+        smoothingAlphaRef.current = alphas[smoothingSpeed as 'slow' | 'medium' | 'fast'] || 0.25;
+      }
       if (deviceId) setSelectedDevice(deviceId);
     }
 
@@ -92,11 +103,16 @@ export default function App() {
       threshold,
       deviceId: selectedDevice,
       durationThreshold,
-      speechFocus
+      calibrationOffset,
+      smoothingSpeed
     }));
     thresholdRef.current = threshold;
     durationRef.current = durationThreshold;
-  }, [threshold, selectedDevice, durationThreshold, speechFocus]);
+    calibrationRef.current = calibrationOffset;
+
+    const alphas = { slow: 0.1, medium: 0.25, fast: 0.6 };
+    smoothingAlphaRef.current = alphas[smoothingSpeed] || 0.25;
+  }, [threshold, selectedDevice, durationThreshold, calibrationOffset, smoothingSpeed]);
 
   useEffect(() => {
     if (!selectedDevice) return;
@@ -106,7 +122,7 @@ export default function App() {
       setPeak(0);
       setHistory(new Array(100).fill(0));
     };
-  }, [selectedDevice, speechFocus]);
+  }, [selectedDevice]);
 
   useEffect(() => {
     // Session aggregator: Every 30 seconds, push the max peak of that period
@@ -129,9 +145,9 @@ export default function App() {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: { exact: deviceId },
-          noiseSuppression: true,
-          echoCancellation: true,
-          autoGainControl: false // Keep it consistent for measurement
+          noiseSuppression: false,
+          echoCancellation: false,
+          autoGainControl: false
         }
       });
       streamRef.current = stream;
@@ -139,71 +155,40 @@ export default function App() {
       audioContext.current = new AudioContext();
       const source = audioContext.current.createMediaStreamSource(stream);
 
-      let lastNode: AudioNode = source;
-
-      if (speechFocus) {
-        // Multi-stage filtering for steep roll-offs (4th order)
-
-        // High-pass: Remove laptop vibrations and keyboard thuds (< 300Hz)
-        const hp1 = audioContext.current.createBiquadFilter();
-        hp1.type = 'highpass';
-        hp1.frequency.value = 300;
-        const hp2 = audioContext.current.createBiquadFilter();
-        hp2.type = 'highpass';
-        hp2.frequency.value = 300;
-
-        // Low-pass: Remove sharp mechanical clicks and high background noise (> 3000Hz)
-        const lp1 = audioContext.current.createBiquadFilter();
-        lp1.type = 'lowpass';
-        lp1.frequency.value = 3000;
-        const lp2 = audioContext.current.createBiquadFilter();
-        lp2.type = 'lowpass';
-        lp2.frequency.value = 3000;
-
-        // Gain compensation: Since filtering reduces energy, we boost the speech range 
-        // to keep the dB readings realistic relative to the ambient noise.
-        const speechGain = audioContext.current.createGain();
-        speechGain.gain.value = 1.8; // ~5dB boost
-
-        lastNode.connect(hp1);
-        hp1.connect(hp2);
-        hp2.connect(lp1);
-        lp1.connect(lp2);
-        lp2.connect(speechGain);
-        lastNode = speechGain;
-      }
-
       analyser.current = audioContext.current.createAnalyser();
-      analyser.current.fftSize = 256;
-      lastNode.connect(analyser.current);
+      analyser.current.fftSize = 1024;
+      source.connect(analyser.current);
 
       const bufferLength = analyser.current.frequencyBinCount;
-      const dataArray = new Uint8Array(bufferLength);
+      const dataArray = new Float32Array(bufferLength);
+      const freqArray = new Uint8Array(bufferLength);
 
       const update = () => {
         if (!analyser.current) return;
-        analyser.current.getByteFrequencyData(dataArray);
+        analyser.current.getFloatTimeDomainData(dataArray);
+        analyser.current.getByteFrequencyData(freqArray);
 
-        // Calculate RMS
+        // Calculate RMS using 32-bit float samples (more precise than 8-bit)
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) {
-          sum += (dataArray[i] / 255) ** 2;
+          sum += dataArray[i] * dataArray[i];
         }
         const rms = Math.sqrt(sum / bufferLength);
 
-        // Convert to dB (approximate calibration)
-        // 20 * log10(rms) -> 0 is silent, 1 is clipping
-        // We offset it to look like real dB levels (30-100 range)
-        const currentDb = Math.round(rms * 100);
+        // Convert to dB with a recalibrated base offset (+80dB)
+        // This is the "sweet spot" identified after testing with -15dB offset.
+        const baseDb = rms > 0.000001 ? 20 * Math.log10(rms) + 80 : 0;
+        const currentDb = Math.round(Math.max(0, baseDb + calibrationRef.current));
         setDb(currentDb);
 
         // Exponential Moving Average for display smoothing
-        const alpha = 0.15; // Smoothing factor (lower = smoother/slower)
+        // Uses dynamic alpha constant based on user preference
+        const alpha = smoothingAlphaRef.current;
         smoothedDbRef.current = (alpha * currentDb) + (1 - alpha) * smoothedDbRef.current;
         setDisplayDb(Math.round(smoothedDbRef.current));
 
-        // Visualizer data
-        const visualData = Array.from(dataArray.slice(0, 40)).map(v => v / 255);
+        // Visualizer data (using freqArray for visual dance)
+        const visualData = Array.from(freqArray.slice(0, 40)).map(v => v / 255);
         setFrequencies(visualData);
 
         // Update Peaks
@@ -507,37 +492,50 @@ export default function App() {
         </div>
 
         <div className="control-item glass">
-          <div className="label" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span>
-              <Mic size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
-              Speech Focus Mode
-            </span>
-            <div
-              onClick={() => setSpeechFocus(!speechFocus)}
-              style={{
-                width: 40,
-                height: 20,
-                background: speechFocus ? 'var(--accent)' : 'rgba(255,255,255,0.1)',
-                borderRadius: 20,
-                position: 'relative',
-                cursor: 'pointer',
-                transition: 'all 0.3s'
-              }}
-            >
-              <div style={{
-                width: 16,
-                height: 16,
-                background: '#fff',
-                borderRadius: '50%',
-                position: 'absolute',
-                top: 2,
-                left: speechFocus ? 22 : 2,
-                transition: 'all 0.3s'
-              }} />
-            </div>
+          <div className="label">
+            <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            Smoothing Speed
           </div>
+          <div className="glass" style={{ display: 'flex', borderRadius: 8, overflow: 'hidden', padding: 2, marginTop: 8 }}>
+            {(['slow', 'medium', 'fast'] as const).map(speed => (
+              <button
+                key={speed}
+                onClick={() => setSmoothingSpeed(speed)}
+                style={{
+                  flex: 1,
+                  background: smoothingSpeed === speed ? 'var(--accent)' : 'transparent',
+                  border: 'none',
+                  color: smoothingSpeed === speed ? '#fff' : 'var(--text-secondary)',
+                  padding: '6px 4px',
+                  fontSize: 10,
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  borderRadius: 6,
+                  fontWeight: '600',
+                  textTransform: 'uppercase'
+                }}
+              >
+                {speed}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="control-item glass">
+          <div className="label">
+            <Activity size={14} style={{ verticalAlign: 'middle', marginRight: 6 }} />
+            Manual Calibration ({calibrationOffset > 0 ? '+' : ''}{calibrationOffset} dB)
+          </div>
+          <input
+            type="range"
+            min="-30"
+            max="30"
+            step="1"
+            value={calibrationOffset}
+            onChange={(e) => setCalibrationOffset(parseInt(e.target.value))}
+          />
           <div style={{ fontSize: 10, opacity: 0.6, marginTop: 4 }}>
-            Filters out keyboard typing and background hum.
+            Compare with a phone app and use this slider to align the readings.
           </div>
         </div>
       </div>
