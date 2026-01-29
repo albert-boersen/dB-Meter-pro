@@ -12,6 +12,7 @@
   --glass-border: rgba(255, 255, 255, 0.08);
 }
 
+
 * {
   margin: 0;
   padding: 0;
@@ -167,6 +168,7 @@ body {
   .db-value {
     font-size: clamp(60px, 20vw, 110px) !important;
   }
+
 }
 
 /* High Fidelity Meter Styles */
@@ -346,4 +348,15 @@ select:hover {
 
 .btn-premium:active {
   transform: translateY(0);
+}
+
+/* Visibility Utilities - Placed after components to ensure correct override without !important */
+.mobile-only {
+  display: none;
+}
+
+@media (max-width: 850px) {
+  .mobile-only {
+    display: flex;
+  }
 }

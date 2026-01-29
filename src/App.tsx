@@ -346,7 +346,7 @@ export default function App() {
 
         {/* Mobile Menu Toggle */}
         <button
-          className="btn-premium"
+          className="btn-premium mobile-only"
           style={{ padding: '4px 8px', height: 26, fontSize: 10, border: 'none', background: isMobileMenuOpen ? 'var(--accent)' : 'rgba(255,255,255,0.05)', color: isMobileMenuOpen ? '#000' : '#fff' }}
           onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         >
@@ -376,9 +376,15 @@ export default function App() {
           </div>
 
           <div className="glass control-item">
-            <div className="label"><Bell size={14} /> Notification Threshold ({threshold} dB)</div>
+            <div className="label"><Bell size={14} /> Threshold ({threshold} dB)</div>
             <input type="range" min="30" max="110" value={threshold} onChange={(e) => setThreshold(parseInt(e.target.value))} />
             <div style={{ fontSize: 9, opacity: 0.6, textAlign: 'center', letterSpacing: 1 }}>{getDbLabel(threshold).toUpperCase()}</div>
+          </div>
+
+          <div className="glass control-item">
+            <div className="label"><Activity size={14} /> Trigger Duration ({durationThreshold} sec)</div>
+            <input type="range" min="1" max="10" step="1" value={durationThreshold} onChange={(e) => setDurationThreshold(parseInt(e.target.value))} />
+            <div style={{ fontSize: 9, opacity: 0.6, textAlign: 'center', letterSpacing: 1 }}>TIME ABOVE THRESHOLD</div>
           </div>
 
           <div className="glass control-item">
