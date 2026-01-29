@@ -57,6 +57,7 @@ function createWindow() {
             nodeIntegration: false,
             contextIsolation: true,
         },
+        icon: path.join(__dirname, 'icon.png'),
     });
 
     if (isDev) {

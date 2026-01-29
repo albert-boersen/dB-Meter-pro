@@ -97,7 +97,7 @@ export default function App() {
   const [isAlerting, setIsAlerting] = useState(false);
   const [frequencies, setFrequencies] = useState<number[]>(new Array(40).fill(0));
   const [events, setEvents] = useState<SoundEvent[]>([]);
-  const [sessionHistory, setSessionHistory] = useState<number[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<number[]>(new Array(100).fill(0));
   const [trendView, setTrendView] = useState<'live' | 'session'>('live');
   const [calibrationOffset, setCalibrationOffset] = useState(0);
   const [smoothingSpeed, setSmoothingSpeed] = useState<'slow' | 'medium' | 'fast'>('medium');
@@ -193,7 +193,15 @@ export default function App() {
       sessionPeakRef.current = 0;
     }, 30000);
 
-    return () => clearInterval(interval);
+    // Also push the initial peak after a short delay so the graph isn't 100% flat initially
+    const initialTimeout = setTimeout(() => {
+      setSessionHistory(prev => [...prev.slice(1), sessionPeakRef.current]);
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      clearTimeout(initialTimeout);
+    };
   }, []);
 
   const startMonitoring = async (deviceId: string) => {
@@ -414,6 +422,7 @@ export default function App() {
             <div className="label"><Activity size={14} /> Manual Calibration ({calibrationOffset > 0 ? '+' : ''}{calibrationOffset} dB)</div>
             <input type="range" min="-30" max="30" value={calibrationOffset} onChange={(e) => setCalibrationOffset(parseInt(e.target.value))} />
           </div>
+
         </aside>
 
         {/* CENTER: Main Meter */}
@@ -490,6 +499,21 @@ export default function App() {
                   </div>
                 ))
               )}
+            </div>
+
+            <div style={{ marginTop: 'auto', paddingTop: 16, display: 'flex', flexDirection: 'column', gap: 6, opacity: 0.5, borderTop: '1px solid var(--glass-border)' }}>
+              <a
+                href="https://buymeacoffee.com/albertboursin"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="footer-link"
+                style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, textDecoration: 'none', color: 'inherit' }}
+              >
+                <span style={{ fontSize: 12 }}>☕</span> Buy me a coffee
+              </a>
+              <div style={{ fontSize: 8.5, letterSpacing: 0.3, lineHeight: 1.4 }}>
+                © 2026 Albert Boersen • Concept & Design
+              </div>
             </div>
           </div>
         </aside>

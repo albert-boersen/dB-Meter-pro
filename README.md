@@ -51,7 +51,11 @@ The output will be found in the `release/win-unpacked` folder.
 - **Animations**: Framer Motion
 
 ---
-*Created with ❤️ by AB for professional noise monitoring.*
+*Concept & Design by Albert Boersen*
 
 If you find this tool useful, consider supporting me with a coffee:
-[Buy me a coffee](https://buymeacoffee.com/albertboursin)
+[☕ Buy me a coffee](https://buymeacoffee.com/albertboursin)
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
