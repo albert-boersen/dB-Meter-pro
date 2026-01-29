@@ -144,13 +144,13 @@ export default function App() {
       if (speechFocus) {
         // Multi-stage filtering for steep roll-offs (4th order)
 
-        // High-pass: Remove laptop vibrations and keyboard thuds (< 400Hz)
+        // High-pass: Remove laptop vibrations and keyboard thuds (< 300Hz)
         const hp1 = audioContext.current.createBiquadFilter();
         hp1.type = 'highpass';
-        hp1.frequency.value = 400;
+        hp1.frequency.value = 300;
         const hp2 = audioContext.current.createBiquadFilter();
         hp2.type = 'highpass';
-        hp2.frequency.value = 400;
+        hp2.frequency.value = 300;
 
         // Low-pass: Remove sharp mechanical clicks and high background noise (> 3000Hz)
         const lp1 = audioContext.current.createBiquadFilter();
@@ -160,11 +160,17 @@ export default function App() {
         lp2.type = 'lowpass';
         lp2.frequency.value = 3000;
 
+        // Gain compensation: Since filtering reduces energy, we boost the speech range 
+        // to keep the dB readings realistic relative to the ambient noise.
+        const speechGain = audioContext.current.createGain();
+        speechGain.gain.value = 1.8; // ~5dB boost
+
         lastNode.connect(hp1);
         hp1.connect(hp2);
         hp2.connect(lp1);
         lp1.connect(lp2);
-        lastNode = lp2;
+        lp2.connect(speechGain);
+        lastNode = speechGain;
       }
 
       analyser.current = audioContext.current.createAnalyser();
